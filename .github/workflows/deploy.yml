@@ -2,21 +2,28 @@ name: Deploy Cloudflare Images
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1
+      - name: Executing remote SSH commands
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             cd /root/tratofacil/cloudflare-images
-            git pull
+            git fetch --all
+            git reset --hard origin/main
+
+            cd /root/tratofacil
+
             docker compose build cloudflare-images
+
             docker compose up -d --no-deps cloudflare-images
+
+            docker image prune -f
