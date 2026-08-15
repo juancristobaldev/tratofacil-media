@@ -9,7 +9,7 @@ async function bootstrap() {
     const app = await NestFactory.create(AppModule);
     const port = process.env.PORT ?? 3002;
 
-    await app.listen(port);
+    await app.listen(port, '0.0.0.0');
     logger.log(`Cloudflare Images CDN corriendo en puerto ${port}`);
     logger.log(`Bucket S3: ${process.env.AWS_BUCKET_NAME ?? 'no configurado'}`);
     logger.log(`Region: ${process.env.AWS_REGION ?? 'no configurada'}`);
