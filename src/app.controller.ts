@@ -2,6 +2,7 @@ import { Controller, Get, Logger, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
+import * as path from 'path';
 
 const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'pdf'];
 
@@ -14,13 +15,14 @@ export class AppController {
   constructor() {
     this.logger.log('Inicializando S3Client...');
 
-    const region = process.env.AWS_REGION;
+    const region = process.env.AWS_REGION || 'auto';
     const accessKey = process.env.AWS_ACCESS_KEY_ID;
     const secretKey = process.env.AWS_SECRET_ACCESS_KEY;
     const bucket = process.env.AWS_BUCKET_NAME;
+    const endpoint = process.env.AWS_ENDPOINT;
 
-    if (!region || !accessKey || !secretKey || !bucket) {
-      this.logger.error('Faltan variables de entorno AWS requeridas');
+    if (!accessKey || !secretKey || !bucket) {
+      this.logger.error('Faltan variables de entorno AWS/R2 requeridas');
       throw new Error('Configuracion AWS incompleta');
     }
 
@@ -28,11 +30,13 @@ export class AppController {
 
     this.s3 = new S3Client({
       region,
+      endpoint: endpoint || undefined,
       credentials: {
         accessKeyId: accessKey,
         secretAccessKey: secretKey,
       },
     });
+
 
     this.logger.log(
       `S3Client inicializado — bucket: ${this.bucket}, region: ${region}`,
@@ -61,9 +65,10 @@ export class AppController {
     }
 
     const extension = fullPath.slice(lastDot + 1).toLowerCase();
-    const s3Key = fullPath.slice(0, lastDot);
+    const rawKey = fullPath.slice(0, lastDot);
+    const s3Key = path.posix.normalize(rawKey.replace(/\\+/g, '/').trim()).replace(/^\/+/, '');
 
-    if (!s3Key || s3Key === 'undefined' || s3Key === 'null') {
+    if (!s3Key || s3Key === '.' || s3Key === 'undefined' || s3Key === 'null' || s3Key.startsWith('..')) {
       this.logger.warn(`Key invalida: "${s3Key}" — ${fullPath}`);
       return res.status(400).send('Invalid key');
     }
@@ -73,6 +78,24 @@ export class AppController {
         `Extension no permitida: .${extension} — ${fullPath}`,
       );
       return res.status(400).send('Invalid file extension');
+    }
+
+    // Security (Law 6: The KYC Privacy Isolation Law):
+    // Bloquear acceso no autenticado y cacheo público CDN para documentos privados y biométricos
+    const lowerKey = s3Key.toLowerCase();
+    const isPrivate =
+      lowerKey.startsWith('kyc/') ||
+      lowerKey.startsWith('identity/') ||
+      lowerKey.startsWith('private/') ||
+      lowerKey.startsWith('documents/') ||
+      lowerKey.startsWith('dni/') ||
+      lowerKey.startsWith('selfie/');
+
+    if (isPrivate) {
+      this.logger.warn(
+        `Acceso bloqueado a recurso privado/KYC: "${s3Key}" — IP: ${req.ip || 'unknown'}`
+      );
+      return res.status(403).send('Forbidden: Private resource');
     }
 
     try {
